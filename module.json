@@ -9,6 +9,16 @@
 	"systems": ["dnd5e"],
     "esmodules": ["/lootsheetnpc5e.js"],
 	"styles": ["/css/lootsheetnpc5e.css"],
+	"languages": [
+	{
+	    "lang": "en", 
+	    "name": "English",
+	    "path": "./lang/en.json"
+	}, {
+	    "lang": "cs",
+	    "name": "Czech",
+	    "path": "./lang/cs.json"
+	}],
 	"socket": true,
 	"url": "https://github.com/jopeek/fvtt-loot-sheet-npc-5e",
 	"manifest": "https://raw.githubusercontent.com/jopeek/fvtt-loot-sheet-npc-5e/master/module.json",
