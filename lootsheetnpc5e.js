@@ -1,4 +1,33 @@
 import ActorSheet5eNPC from "../../systems/dnd5e/module/actor/sheets/npc.js";
+import Item5e from "../../systems/dnd5e/module/item/entity.js";
+
+class LootSheet5eNPCHelper
+{
+    /**
+     * Retrieve the loot permission for a player, given the current actor data.
+     * 
+     * It first tries to get an entry from the actor's permissions, if none is found it uses default, otherwise returns 0.
+     * 
+     */
+    static getLootPermissionForPlayer(actorData, player) {
+        let defaultPermission = actorData.permission.default;
+        if (player.data._id in actorData.permission)
+        {
+            //console.log("Loot Sheet | Found individual actor permission");
+            return actorData.permission[player.data._id];
+            //console.log("Loot Sheet | assigning " + actorData.permission[player.data._id] + " permission to hidden field");
+        }
+        else if (typeof defaultPermission !== "undefined")
+        {
+            //console.log("Loot Sheet | default permissions", actorData.permission.default);
+            return defaultPermission;
+        }
+        else 
+        {
+            return 0;
+        }
+    }
+}
 
 class QuantityDialog extends Dialog {
     constructor(callback, options) {
@@ -248,23 +277,23 @@ class LootSheet5eNPC extends ActorSheet5eNPC {
 
         let rolltable = game.tables.getName(rolltableName);
         if (!rolltable) {
-            //console.log(`Loot Sheet | No Rollable Table found with name "${rolltableName}".`);
+            // console.log(`Loot Sheet | No Rollable Table found with name "${rolltableName}".`);
             return ui.notifications.error(`No Rollable Table found with name "${rolltableName}".`);
         }
-
+        
         if (itemOnlyOnce) {
             if (rolltable.results.length < shopQtyRoll.total)  {
                 return ui.notifications.error(`Cannot create a merchant with ${shopQtyRoll.total} unqiue entries if the rolltable only contains ${rolltable.results.length} items`);
             }
         }
 
-        //console.log(rolltable);
+        // console.log(rolltable);
 
         if (clearInventory) {
 
             let currentItems = this.actor.data.items.map(i => i._id);
             await this.actor.deleteEmbeddedEntity("OwnedItem", currentItems);
-            //console.log(currentItems);
+            // console.log(currentItems);
         }
 
         console.log(`Loot Sheet | Adding ${shopQtyRoll.result} new items`);
@@ -279,24 +308,28 @@ class LootSheet5eNPC extends ActorSheet5eNPC {
                     newItem = game.items.get(rollResult.results[0].resultId);
                 }
                 else {
-                    //Try to find it in the compendium
+                    // Try to find it in the compendium
                     const items = game.packs.get(rollResult.results[0].collection);
-                    //console.log(items);
-                    //dnd5eitems.getIndex().then(index => console.log(index));
-                    //let newItem = dnd5eitems.index.find(e => e.id === rollResult.results[0].resultId);
-                    //items.getEntity(rollResult.results[0].resultId).then(i => console.log(i));
+                    // console.log(items);
+                    // dnd5eitems.getIndex().then(index => console.log(index));
+                    // let newItem = dnd5eitems.index.find(e => e.id === rollResult.results[0].resultId);
+                    // items.getEntity(rollResult.results[0].resultId).then(i => console.log(i));
                     newItem = await items.getEntity(rollResult.results[0].resultId);
                 }
                 if (!newItem || newItem === null) {
-                    //console.log(`Loot Sheet | No item found "${rollResult.results[0].resultId}".`);
+                    // console.log(`Loot Sheet | No item found "${rollResult.results[0].resultId}".`);
                     return ui.notifications.error(`No item found "${rollResult.results[0].resultId}".`);
                 }
-    
+                
+                if (newItem.type === "spell") {
+                    newItem = await Item5e.createScrollFromSpell(newItem)
+                }
+
                 let itemQtyRoll = new Roll(itemQtyFormula);
                 itemQtyRoll.roll();
                 console.log(`Loot Sheet | Adding ${itemQtyRoll.total} x ${newItem.name}`)
     
-                //newItem.data.quantity = itemQtyRoll.result;
+                // newItem.data.quantity = itemQtyRoll.result;
     
                 let existingItem = this.actor.items.find(item => item.data.name == newItem.name);
     
@@ -304,7 +337,7 @@ class LootSheet5eNPC extends ActorSheet5eNPC {
                     await this.actor.createEmbeddedEntity("OwnedItem", newItem);
                     console.log(`Loot Sheet | ${newItem.name} does not exist.`);
                     existingItem = this.actor.items.find(item => item.data.name == newItem.name);
-    
+
                     if (itemQtyLimit > 0 && Number(itemQtyLimit) < Number(itemQtyRoll.total)) {
                         await existingItem.update({ "data.quantity": itemQtyLimit });
                         if (!reducedVerbosity) ui.notifications.info(`Added new ${itemQtyLimit} x ${newItem.name}.`);
@@ -401,6 +434,10 @@ class LootSheet5eNPC extends ActorSheet5eNPC {
                 }
                 if (!newItem || newItem === null) {
                     return ui.notifications.error(`No item found "${rolltable.results[index].resultId}".`);
+                }
+
+                if (newItem.type === "spell") {
+                    newItem = await Item5e.createScrollFromSpell(newItem)
                 }
 
                 await this.actor.createEmbeddedEntity("OwnedItem", newItem);
@@ -796,15 +833,15 @@ class LootSheet5eNPC extends ActorSheet5eNPC {
 
     _hackydistributeCoins(containerActor) {
         //This is identical as the distributeCoins function defined in the init hook which for some reason can't be called from the above _distributeCoins method of the LootSheetNPC5E class. I couldn't be bothered to figure out why a socket can't be called as the GM... so this is a hack but it works.
-
         let actorData = containerActor.data
         let observers = [];
+        let players = game.users.players;
+
         //console.log("Loot Sheet | actorData", actorData);
         // Calculate observers
-        for (let u in actorData.permission) {
-            if (u != "default" && actorData.permission[u] >= 2) {
-                //console.log("Loot Sheet | u in actorData.permission", u);
-                let player = game.users.get(u);
+        for (let player of players) {
+            let playerPermission = LootSheet5eNPCHelper.getLootPermissionForPlayer(actorData, player);
+            if (player != "default" && playerPermission >= 2) {
                 //console.log("Loot Sheet | player", player);
                 let actor = game.actors.get(player.data.character);
                 //console.log("Loot Sheet | actor", actor);
@@ -1083,72 +1120,46 @@ class LootSheet5eNPC extends ActorSheet5eNPC {
      * Prepares GM settings to be rendered by the loot sheet.
      * @private
      */
-    _prepareGMSettings(actorData) {
-
-        const players = [],
-            observers = [];
-        let users = game.users.entities;
+     _prepareGMSettings(actorData) {
+        const playerData = [],
+              observers = [];
+      
+        let players = game.users.players;
         let commonPlayersPermission = -1;
 
         //console.log("Loot Sheet _prepareGMSettings | actorData.permission", actorData.permission);
 
-        for (let u of users) {
-            //console.log("Loot Sheet | Checking user " + u.data.name, u);
+        for (let player of players)
+        {
+            //console.log("Loot Sheet | Checking user " + player.data.name, player);
 
-            //check if the user is a player 
-            if (u.data.role === 1 || u.data.role === 2) {
+            // get the name of the primary actor for a player
+            const actor = game.actors.get(player.data.character);
+            //console.log("Loot Sheet | Checking actor", actor);
+            
+            if (actor) {
+                player.actor = actor.data.name;
+                player.actorId = actor.data._id;
+                player.playerId = player.data._id;
 
-                // get the name of the primary actor for a player
-                const actor = game.actors.get(u.data.character);
-                //console.log("Loot Sheet | Checking actor", actor);
+                player.lootPermission = LootSheet5eNPCHelper.getLootPermissionForPlayer(actorData, player);
 
-                if (actor) {
-
-                    u.actor = actor.data.name;
-                    u.actorId = actor.data._id;
-                    u.playerId = u.data._id;
-
-                    //Check if there are default permissions to the actor
-                    if (typeof actorData.permission.default !== "undefined") {
-
-                        //console.log("Loot Sheet | default permissions", actorData.permission.default);
-
-                        u.lootPermission = actorData.permission.default;
-
-                        if (actorData.permission.default >= 2 && !observers.includes(actor.data._id)) {
-
-                            observers.push(actor.data._id);
-                        }
-
-                    } else {
-
-                        u.lootPermission = 0;
-                        //console.log("Loot Sheet | assigning 0 permission to hidden field");
-                    }
-
-                    //if the player has some form of permission to the object update the actorData
-                    if (u.data._id in actorData.permission && !observers.includes(actor.data._id)) {
-                        //console.log("Loot Sheet | Found individual actor permission");
-
-                        u.lootPermission = actorData.permission[u.data._id];
-                        //console.log("Loot Sheet | assigning " + actorData.permission[u.data._id] + " permission to hidden field");
-
-                        if (actorData.permission[u.data._id] >= 2) {
-                            observers.push(actor.data._id);
-                        }
-                    }
-
-                    //Set icons and permission texts for html
-                    //console.log("Loot Sheet | lootPermission", u.lootPermission);
-                    if (commonPlayersPermission < 0) {
-                        commonPlayersPermission = u.lootPermission;
-                    } else if (commonPlayersPermission !== u.lootPermission) {
-                        commonPlayersPermission = 999;
-                    }
-                    u.icon = this._getPermissionIcon(u.lootPermission);
-                    u.lootPermissionDescription = this._getPermissionDescription(u.lootPermission);
-                    players.push(u);
+                if (player.lootPermission >= 2 && !observers.includes(actor.data._id))
+                {
+                    observers.push(actor.data._id);
                 }
+
+                //Set icons and permission texts for html
+                //console.log("Loot Sheet | lootPermission", player.lootPermission);
+                if (commonPlayersPermission < 0) {
+                    commonPlayersPermission = player.lootPermission;
+                } else if (commonPlayersPermission !== player.lootPermission) {
+                    commonPlayersPermission = 999;
+                }
+                
+                player.icon = this._getPermissionIcon(player.lootPermission);
+                player.lootPermissionDescription = this._getPermissionDescription(player.lootPermission);
+                playerData.push(player);
             }
         }
 
@@ -1162,7 +1173,7 @@ class LootSheet5eNPC extends ActorSheet5eNPC {
         }
 
         let loot = {}
-        loot.players = players;
+        loot.players = playerData;
         loot.observerCount = observers.length;
         loot.currency = currencySplit;
         loot.playersPermission = commonPlayersPermission;
@@ -1170,7 +1181,6 @@ class LootSheet5eNPC extends ActorSheet5eNPC {
         loot.playersPermissionDescription = this._getPermissionDescription(commonPlayersPermission);
         actorData.flags.loot = loot;
     }
-
 
 }
 
@@ -1180,61 +1190,6 @@ Actors.registerSheet("dnd5e", LootSheet5eNPC, {
     makeDefault: false
 });
 
-
-/**
- * Register a hook to convert any spell created on an actor with the LootSheet5eNPC sheet to a consumable scroll.
- */
-Hooks.on('preCreateOwnedItem', (actor, item, data) => {
-
-    // console.log("Loot Sheet | actor", actor);
-    // console.log("Loot Sheet | item", item);
-    // console.log("Loot Sheet | data", data);
-
-    if (!actor) throw new Error(`Parent Actor ${actor._id} not found`);
-
-    // Check if Actor is an NPC
-    if (actor.data.type === "character") return;
-
-    // If the actor is using the LootSheet5eNPC then check in the item is a spell and if so update the name.
-    if ((actor.data.flags.core || {}).sheetClass === "dnd5e.LootSheet5eNPC") {
-        if (item.type === "spell") {
-            //console.log("Loot Sheet | dragged spell item", item);
-
-            let changeScrollIcon = game.settings.get("lootsheetnpc5e", "changeScrollIcon");
-
-            if (changeScrollIcon) item.img = "modules/lootsheetnpc5e/icons/Scroll" + item.data.level + ".png";
-
-            //console.log("Loot Sheet | check changeScrollIcon", changeScrollIcon);
-
-            item.name = "Scroll of " + item.name;
-            item.type = "consumable";
-            item.data.price = Math.round(10 * Math.pow(2.6, item.data.level));
-            //console.log("Loot Sheet | price of scroll", item.data.price);
-            item.data.autoDestroy = {
-                label: "Destroy on Empty",
-                type: "Boolean",
-                value: true
-            }
-            item.data.autoUse = {
-                label: "Consume on Use",
-                type: "Boolean",
-                value: true
-            }
-            item.data.charges = {
-                label: "Charges",
-                max: 1,
-                type: "Number",
-                value: 1
-            }
-            item.data.consumableType = {
-                label: "Consumable Type",
-                type: "String",
-                value: "scroll"
-            }
-        }
-    } else return;
-
-});
 
 Hooks.once("init", () => {
 
@@ -1249,15 +1204,6 @@ Hooks.once("init", () => {
         scope: "world",
         config: true,
         default: false,
-        type: Boolean
-    });
-
-    game.settings.register("lootsheetnpc5e", "changeScrollIcon", {
-        name: "Change icon for Spell Scrolls?",
-        hint: "Changes the icon for spell scrolls to a scroll icon. If left unchecked, retains the spell's icon.",
-        scope: "world",
-        config: true,
-        default: true,
         type: Boolean
     });
 
@@ -1553,12 +1499,13 @@ Hooks.once("init", () => {
     function distributeCoins(containerActor) {
         let actorData = containerActor.data
         let observers = [];
+        let players = game.users.players;
+
         //console.log("Loot Sheet | actorData", actorData);
         // Calculate observers
-        for (let u in actorData.permission) {
-            if (u != "default" && actorData.permission[u] >= 2) {
-                //console.log("Loot Sheet | u in actorData.permission", u);
-                let player = game.users.get(u);
+        for (let player of players) {
+            let playerPermission = LootSheet5eNPCHelper.getLootPermissionForPlayer(actorData, player);
+            if (player != "default" && playerPermission >= 2) {
                 //console.log("Loot Sheet | player", player);
                 let actor = game.actors.get(player.data.character);
                 //console.log("Loot Sheet | actor", actor);
